@@ -1,0 +1,1527 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Line efficiency</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/luxon/3.4.4/luxon.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-luxon@1.3.1/dist/chartjs-adapter-luxon.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+  :root{
+    --bg: #14181C;
+    --surface: #1D2329;
+    --surface-raised: #262E36;
+    --border: #333D47;
+    --text: #E8EAED;
+    --text-dim: #8B96A3;
+    --teal: #2DD4BF;
+    --amber: #F5A623;
+    --red: #E5484D;
+    --mono: 'IBM Plex Mono', 'Courier New', monospace;
+    --sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--sans);
+    min-height: 100vh;
+  }
+
+  /* ---------- Login ---------- */
+  #login-screen {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 100vh;
+    padding: 20px;
+  }
+  #login-box {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 36px 32px;
+    width: 100%;
+    max-width: 340px;
+  }
+  #login-box h1 { font-size: 18px; font-weight: 600; margin: 0 0 4px; }
+  #login-box p.sub { color: var(--text-dim); font-size: 13px; margin: 0 0 24px; }
+  input {
+    width: 100%;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 10px 12px;
+    color: var(--text);
+    font-size: 14px;
+    margin-bottom: 12px;
+  }
+  input:focus { outline: none; border-color: var(--teal); }
+  button {
+    background: var(--teal);
+    color: #0A1210;
+    border: none;
+    border-radius: 6px;
+    padding: 10px 16px;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    width: 100%;
+  }
+  button:hover { opacity: 0.9; }
+  button.secondary {
+    background: transparent;
+    border: 1px solid var(--border);
+    color: var(--text);
+  }
+  #login-error { color: var(--red); font-size: 13px; margin-top: 10px; min-height: 16px; }
+
+  /* ---------- Dashboard ---------- */
+  #dashboard { display: none; max-width: 1000px; margin: 0 auto; padding: 24px 20px 60px; }
+  header.topbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 28px;
+  }
+  header.topbar h1 { font-size: 20px; font-weight: 600; margin: 0; }
+  header.topbar .machine-tag {
+    font-family: var(--mono);
+    font-size: 12px;
+    color: var(--text-dim);
+  }
+  #sign-out { width: auto; background: transparent; border: 1px solid var(--border); color: var(--text-dim); padding: 6px 12px; font-size: 12px; }
+
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; margin-bottom: 24px; }
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 18px 20px;
+  }
+  .card .label { font-size: 12px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 8px; }
+  .card .value { font-family: var(--mono); font-size: 28px; font-weight: 600; }
+  .card .value.small { font-size: 18px; font-weight: 500; font-family: var(--sans); }
+  .card .sub-value { font-size: 12px; color: var(--text-dim); margin-top: 4px; font-family: var(--mono); }
+
+  /* ---------- Gauge ---------- */
+  #gauge-card { grid-column: span 1; display: flex; flex-direction: column; align-items: center; text-align: center; }
+  .gauge-wrap { position: relative; width: 140px; height: 140px; margin: 4px 0 10px; }
+  .gauge-wrap svg { transform: rotate(-90deg); }
+  .gauge-pct {
+    position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+    display: flex; align-items: center; justify-content: center;
+    font-family: var(--mono); font-size: 26px; font-weight: 700;
+  }
+
+  section.panel {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 20px;
+    margin-bottom: 20px;
+  }
+  section.panel h2 { font-size: 14px; font-weight: 600; margin: 0 0 16px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.04em; }
+  #history-chart-wrap { flex: 1; min-height: 180px; }
+
+  /* ---------- Machine overview cards ---------- */
+  #machines-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 14px; margin-bottom: 24px; }
+  .machine-card {
+    background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
+    padding: 16px 18px; cursor: pointer; transition: border-color 0.15s;
+  }
+  .machine-card:hover { border-color: var(--text-dim); }
+  .machine-card.selected { border-color: var(--teal); }
+  .mc-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
+  .mc-title { font-size: 15px; font-weight: 600; }
+  .mc-product {
+    font-size: 11px; color: var(--text); font-family: var(--mono); font-weight: 500;
+    background: var(--surface-raised); padding: 3px 9px; border-radius: 6px;
+  }
+  .mc-body { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+  .mc-status-col { flex: 1; min-width: 0; }
+  .mc-status { display: flex; align-items: center; gap: 8px; }
+  .mc-status .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--text-dim); flex-shrink: 0; }
+  .mc-status .dot.running { background: var(--teal); box-shadow: 0 0 0 3px rgba(45,212,191,0.15); }
+  .mc-status .dot.idle { background: var(--amber); box-shadow: 0 0 0 3px rgba(245,166,35,0.15); }
+  .mc-status-text { font-size: 13px; font-weight: 600; }
+  .mc-status-sub { font-size: 11px; color: var(--text-dim); font-family: var(--mono); margin: 3px 0 0 18px; }
+  .mc-cycle-col { text-align: center; flex-shrink: 0; padding: 0 6px; }
+  .mc-cycle-label { font-size: 9px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.03em; line-height: 1.3; margin-bottom: 4px; }
+  .mc-cycle-value { font-family: var(--mono); font-size: 15px; font-weight: 600; }
+  .mc-gauges { display: flex; gap: 10px; flex-shrink: 0; }
+  .mc-gauge-col { display: flex; flex-direction: column; align-items: center; gap: 3px; }
+  .mc-gauge-caption { font-size: 9px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.02em; }
+  .mc-gauge-wrap { position: relative; width: 52px; height: 52px; flex-shrink: 0; }
+  .mc-gauge-wrap svg { transform: rotate(-90deg); width: 100%; height: 100%; }
+  .mc-gauge-pct { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-family: var(--mono); font-size: 13px; font-weight: 700; }
+  .mc-footer {
+    display: flex; justify-content: space-between; align-items: center;
+    margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--border);
+    font-size: 12px; font-family: var(--mono); color: var(--text-dim);
+  }
+  .mc-daily { color: var(--text); font-weight: 600; }
+  .mc-uptime .up { color: var(--teal); }
+  .mc-uptime .idle-pct { color: var(--amber); }
+  .reject-count { color: var(--red); }
+  @media (max-width: 420px) {
+    #machines-grid { grid-template-columns: 1fr; }
+    .machine-card { padding: 12px 14px; }
+    .mc-gauge-wrap { width: 44px; height: 44px; }
+    .mc-title { font-size: 13px; }
+    .mc-product, .mc-status-sub, .mc-cycle-value, .mc-footer { font-size: 10px; }
+  }
+
+  /* ---------- Selected machine detail ---------- */
+  #live-top-row { display: flex; align-items: center; gap: 32px; flex-wrap: wrap; justify-content: center; }
+  #live-chart-section { }
+  #live-chart-wrap { flex: 1; min-height: 140px; }
+  .detail-row { display: flex; gap: 16px; align-items: stretch; }
+  .detail-row > .panel { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+  .detail-row #live-chart-section { display: flex; flex-direction: column; flex: 1; }
+  @media (max-width: 760px) { .detail-row { flex-direction: column; } }
+  #live-uptime-summary { display: flex; gap: 20px; flex-wrap: wrap; margin-bottom: 12px; }
+  #live-uptime-summary .stat { font-size: 13px; }
+  #live-uptime-summary .stat .num { font-family: var(--mono); font-weight: 600; font-size: 15px; }
+  #live-uptime-summary .stat.running .num { color: var(--teal); }
+  #live-uptime-summary .stat.idle .num { color: var(--amber); }
+  #live-chart-legend { display: flex; gap: 16px; font-size: 11px; color: var(--text-dim); margin-top: 8px; }
+  #live-chart-legend span { display: inline-flex; align-items: center; gap: 5px; }
+  #live-chart-legend .dot { width: 8px; height: 8px; border-radius: 50%; }
+
+  /* ---------- Settings ---------- */
+  .page-nav { display: flex; gap: 4px; margin-bottom: 24px; border-bottom: 1px solid var(--border); }
+  .nav-btn {
+    width: auto; background: transparent; border: none; border-bottom: 2px solid transparent;
+    color: var(--text-dim); font-size: 14px; font-weight: 500; padding: 10px 4px; margin-right: 20px;
+    cursor: pointer; border-radius: 0;
+  }
+  .nav-btn:hover { color: var(--text); }
+  .nav-btn.active { color: var(--teal); border-bottom-color: var(--teal); }
+  .page { display: block; }
+  .field-row { display: flex; gap: 12px; align-items: flex-end; flex-wrap: wrap; margin-bottom: 14px; }
+  .field { flex: 1; min-width: 150px; }
+  .field label {
+    display: flex; align-items: flex-end;
+    min-height: 30px; margin-bottom: 6px;
+    font-size: 12px; color: var(--text-dim);
+  }
+  .field label.empty { visibility: hidden; }
+  .field-row input, .field-row select { margin-bottom: 0; }
+  select {
+    width: 100%; background: var(--bg); border: 1px solid var(--border);
+    border-radius: 6px; padding: 10px 12px; color: var(--text); font-size: 14px;
+  }
+  .field button { width: auto; padding: 10px 18px; }
+  #product-list { margin-top: 16px; border-top: 1px solid var(--border); padding-top: 16px; }
+  #product-list table, #machines-list table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  #product-list th, #machines-list th { text-align: left; color: var(--text-dim); font-weight: 500; padding: 6px 8px; font-size: 11px; text-transform: uppercase; }
+  #product-list td, #machines-list td { padding: 8px; border-top: 1px solid var(--border); font-family: var(--mono); }
+  #machines-list { margin-top: 16px; }
+  #machines-list tr.selected td { color: var(--teal); }
+  .save-msg { font-size: 12px; color: var(--teal); margin-top: 8px; min-height: 16px; }
+  .row-action-btn {
+    width: auto; padding: 4px 10px; font-size: 11px; font-weight: 500;
+    background: transparent; border: 1px solid var(--border); color: var(--text-dim);
+    margin-right: 6px;
+  }
+  .row-action-btn:hover { color: var(--text); border-color: var(--text-dim); }
+  .row-action-btn.delete:hover { color: var(--red); border-color: var(--red); }
+  #detection-list { max-height: 260px; overflow-y: auto; font-family: var(--mono); font-size: 12px; }
+  .detection-row { display: flex; gap: 14px; padding: 6px 0; border-top: 1px solid var(--border); }
+  .detection-row:first-child { border-top: none; }
+  .detection-row .d-time { color: var(--text-dim); flex-shrink: 0; white-space: nowrap; }
+  .detection-row .d-distance { color: var(--text); font-weight: 600; flex-shrink: 0; width: 70px; }
+  .detection-row .d-cycle { color: var(--text-dim); flex-shrink: 0; width: 90px; }
+  .detection-row .d-product { color: var(--text-dim); }
+
+  /* ---------- Device status & logs ---------- */
+  #device-status { display: flex; align-items: center; gap: 10px; margin-bottom: 16px; font-size: 13px; }
+  #device-status .dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+  #device-status .dot.ok { background: var(--teal); }
+  #device-status .dot.stale { background: var(--amber); }
+  #device-status .dot.offline { background: var(--red); }
+  #log-list { max-height: 260px; overflow-y: auto; font-family: var(--mono); font-size: 12px; }
+  .log-row { display: flex; gap: 12px; padding: 6px 0; border-top: 1px solid var(--border); }
+  .log-row:first-child { border-top: none; }
+  .log-row .log-time { color: var(--text-dim); flex-shrink: 0; white-space: nowrap; }
+  .log-row .log-level { flex-shrink: 0; width: 62px; font-weight: 600; }
+  .log-row.level-INFO .log-level { color: var(--text-dim); }
+  .log-row.level-WARNING .log-level { color: var(--amber); }
+  .log-row.level-ERROR .log-level { color: var(--red); }
+  .log-row .log-message { color: var(--text); word-break: break-word; }
+</style>
+</head>
+<body>
+
+<div id="login-screen">
+  <div id="login-box">
+    <h1>Line efficiency</h1>
+    <p class="sub">Sign in to view the dashboard</p>
+    <input type="email" id="login-email" placeholder="Email" autocomplete="email">
+    <input type="password" id="login-password" placeholder="Password" autocomplete="current-password">
+    <button id="login-btn">Sign in</button>
+    <div id="login-error"></div>
+  </div>
+</div>
+
+<div id="dashboard">
+  <header class="topbar">
+    <div>
+      <h1>Line efficiency</h1>
+      <div class="machine-tag" id="machine-tag">-</div>
+    </div>
+    <button id="sign-out">Sign out</button>
+  </header>
+
+  <nav class="page-nav">
+    <button class="nav-btn active" data-page="dashboard">Dashboard</button>
+    <button class="nav-btn" data-page="diagnostics">Diagnostics</button>
+    <button class="nav-btn" data-page="settings">Settings</button>
+  </nav>
+
+  <div id="page-dashboard" class="page">
+    <div id="machines-grid"></div>
+
+    <div class="detail-row">
+      <section class="panel">
+        <div id="live-chart-section">
+          <div id="live-uptime-summary"></div>
+          <div id="live-chart-wrap"><canvas id="live-chart"></canvas></div>
+          <div id="live-chart-legend">
+            <span><i class="dot" style="background:var(--teal)"></i>running</span>
+            <span><i class="dot" style="background:var(--amber)"></i>idle</span>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel">
+        <h2>Efficiency, last 14 days</h2>
+        <div id="history-chart-wrap"><canvas id="history-chart"></canvas></div>
+      </section>
+    </div>
+  </div>
+
+  <div id="page-diagnostics" class="page" style="display:none">
+    <section class="panel">
+      <h2>Pi status &amp; logs</h2>
+      <div id="device-status"></div>
+      <div id="log-list"></div>
+    </section>
+
+    <section class="panel">
+      <h2>Recent detections</h2>
+      <div id="detection-list"></div>
+    </section>
+  </div>
+
+  <div id="page-settings" class="page" style="display:none">
+    <section class="panel" id="settings-panel">
+      <h2>Machines</h2>
+    <div class="field-row">
+      <div class="field">
+        <label>New machine ID</label>
+        <input type="text" id="new-machine-id" placeholder="e.g. line3">
+      </div>
+      <div class="field">
+        <label class="empty">Add</label>
+        <button id="add-machine-btn">Add machine</button>
+      </div>
+    </div>
+    <div class="save-msg" id="add-machine-msg"></div>
+
+    <div id="machines-list">
+      <table>
+        <thead><tr><th>Machine</th><th>Product</th><th>Distance range (cm)</th><th>Hours/day</th><th></th></tr></thead>
+        <tbody id="machines-list-body"></tbody>
+      </table>
+    </div>
+
+    <h2 style="margin-top:24px">Settings for <span id="settings-machine-label">-</span></h2>
+    <div class="field-row">
+      <div class="field">
+        <label>Product type</label>
+        <select id="setting-product-type"></select>
+      </div>
+      <div class="field">
+        <label>Units per cycle</label>
+        <input type="number" id="setting-units-per-cycle" min="1" step="1">
+      </div>
+      <div class="field">
+        <label>Min distance (cm)</label>
+        <input type="number" id="setting-distance-min" min="0" step="1" placeholder="0">
+      </div>
+      <div class="field">
+        <label>Max distance (cm)</label>
+        <input type="number" id="setting-distance" min="1" step="1">
+      </div>
+      <div class="field">
+        <label>Hours per day</label>
+        <input type="number" id="setting-hours" min="1" max="24" step="0.5">
+      </div>
+      <div class="field">
+        <label class="empty">Save</label>
+        <button id="save-machine-btn">Save</button>
+      </div>
+    </div>
+    <p style="font-size:12px;color:var(--text-dim);margin:-6px 0 14px">
+      A count only registers when the reading falls between min and max - keeps a static object
+      (e.g. a block left in the fall-out zone) from being mistaken for product. Leave min at 0 for no lower bound.
+    </p>
+    <div class="save-msg" id="machine-save-msg"></div>
+
+    <h2 style="margin-top:24px">Product types</h2>
+    <div class="field-row">
+      <div class="field">
+        <label>Product type name</label>
+        <input type="text" id="new-product-name" placeholder="e.g. 50mm panel">
+      </div>
+      <div class="field">
+        <label>Expected cycle (sec)</label>
+        <input type="number" id="new-product-cycle" min="1" step="0.1">
+      </div>
+      <div class="field">
+        <label>Min. recount gap (sec)</label>
+        <input type="number" id="new-product-min-cycle" min="0" step="0.1" placeholder="e.g. 50">
+      </div>
+      <div class="field">
+        <label class="empty">Save</label>
+        <button id="save-product-btn">Add / update</button>
+      </div>
+      <div class="field">
+        <label class="empty">Cancel</label>
+        <button id="cancel-edit-product-btn" class="secondary" style="display:none">Cancel edit</button>
+      </div>
+    </div>
+    <div class="save-msg" id="product-save-msg"></div>
+    <div id="product-list">
+      <table>
+        <thead><tr><th>Product type</th><th>Expected cycle time (sec)</th><th>Min. before recount (sec)</th><th></th></tr></thead>
+        <tbody id="product-list-body"></tbody>
+      </table>
+    </div>
+    </section>
+  </div>
+</div>
+
+<script>
+const SUPABASE_URL = "https://jrpysikxibrbbellroid.supabase.co";
+const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImpycHlzaWt4aWJyYmJlbGxyb2lkIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODA2MDM0OTksImV4cCI6MjA5NjE3OTQ5OX0.6ffi5GLkjs6qQ3Oqks8c1niu7-yrqrIG5P5aWWSFlN0";
+let currentMachineId = null; // set once loadMachines() runs, or by clicking a machine card
+let machines = [];
+// Set by loadAllMachineDailyStats (its own refresh cycle), read by
+// renderUptimeSummary (a different refresh cycle) - a small bridge between
+// the two rather than threading this through every function call.
+let currentRejectPct = null;
+let currentRejectCount = 0;
+const TZ = "Pacific/Auckland";
+
+const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+const { DateTime } = luxon;
+
+// Shades the background behind idle segments so idle time reads clearly
+// even at a glance, not just from the thin line color. Uses real timestamps
+// (not point index) so a 5-minute gap is visibly wider than a 5-second one.
+Chart.register({
+  id: 'idleShading',
+  beforeDatasetsDraw(chart, args, options) {
+    const flags = (options && options.flags) || [];
+    const timestamps = (options && options.timestamps) || [];
+    if (!flags.length || !timestamps.length) return;
+    const { ctx, chartArea, scales: { x } } = chart;
+    if (!chartArea) return;
+    ctx.save();
+    ctx.fillStyle = 'rgba(245,166,35,0.14)';
+    for (let i = 1; i < flags.length; i++) {
+      if (flags[i]) {
+        const x0 = x.getPixelForValue(timestamps[i - 1]);
+        const x1 = x.getPixelForValue(timestamps[i]);
+        ctx.fillRect(x0, chartArea.top, x1 - x0, chartArea.bottom - chartArea.top);
+      }
+    }
+    ctx.restore();
+  }
+});
+
+let machineConfig = null;
+let productTypes = [];
+let historyChart = null;
+let liveChart = null;
+
+// ---------------- Auth ----------------
+
+async function checkSession() {
+  const { data } = await sb.auth.getSession();
+  if (data.session) {
+    showDashboard();
+  } else {
+    showLogin();
+  }
+}
+
+function showLogin() {
+  document.getElementById('login-screen').style.display = 'flex';
+  document.getElementById('dashboard').style.display = 'none';
+}
+
+function showDashboard() {
+  document.getElementById('login-screen').style.display = 'none';
+  document.getElementById('dashboard').style.display = 'block';
+  loadEverything();
+}
+
+document.getElementById('login-btn').addEventListener('click', async () => {
+  const email = document.getElementById('login-email').value.trim();
+  const password = document.getElementById('login-password').value;
+  const errEl = document.getElementById('login-error');
+  errEl.textContent = '';
+  const { error } = await sb.auth.signInWithPassword({ email, password });
+  if (error) {
+    errEl.textContent = error.message;
+  } else {
+    showDashboard();
+  }
+});
+
+document.getElementById('sign-out').addEventListener('click', async () => {
+  stopLiveRefresh();
+  await sb.auth.signOut();
+  showLogin();
+});
+
+// ---------------- Data loading ----------------
+
+async function loadEverything() {
+  await loadMachines();
+  await loadProductTypes();
+  renderMachineCards();
+  await Promise.all([loadAllMachineLiveStats(), loadAllMachineDailyStats()]);
+
+  if (currentMachineId) {
+    document.getElementById('settings-machine-label').textContent = currentMachineId;
+    await loadMachineConfig();
+    await Promise.all([loadHistory(), loadLiveChart(), loadLogs(), loadDetections()]);
+    populateSettingsForm();
+  }
+  startLiveRefresh();
+}
+
+let liveRefreshInterval = null;
+let dailyRefreshInterval = null;
+let liveChartRefreshInterval = null;
+let logsRefreshInterval = null;
+let detectionsRefreshInterval = null;
+
+function startLiveRefresh() {
+  if (liveRefreshInterval) clearInterval(liveRefreshInterval);
+  liveRefreshInterval = setInterval(loadAllMachineLiveStats, 5000);
+  if (dailyRefreshInterval) clearInterval(dailyRefreshInterval);
+  dailyRefreshInterval = setInterval(loadAllMachineDailyStats, 20000);
+  if (liveChartRefreshInterval) clearInterval(liveChartRefreshInterval);
+  liveChartRefreshInterval = setInterval(loadLiveChart, 20000);
+  if (logsRefreshInterval) clearInterval(logsRefreshInterval);
+  logsRefreshInterval = setInterval(loadLogs, 20000);
+  if (detectionsRefreshInterval) clearInterval(detectionsRefreshInterval);
+  detectionsRefreshInterval = setInterval(loadDetections, 5000);
+}
+
+function stopLiveRefresh() {
+  if (liveRefreshInterval) clearInterval(liveRefreshInterval);
+  liveRefreshInterval = null;
+  if (dailyRefreshInterval) clearInterval(dailyRefreshInterval);
+  dailyRefreshInterval = null;
+  if (liveChartRefreshInterval) clearInterval(liveChartRefreshInterval);
+  liveChartRefreshInterval = null;
+  if (logsRefreshInterval) clearInterval(logsRefreshInterval);
+  logsRefreshInterval = null;
+  if (detectionsRefreshInterval) clearInterval(detectionsRefreshInterval);
+  detectionsRefreshInterval = null;
+}
+
+// ---------------- Machines (overview grid + selection) ----------------
+
+async function loadMachines() {
+  const { data, error } = await sb.from('machine_config').select('*').order('machine_id');
+  if (error) { console.error(error); return; }
+  machines = data || [];
+  if (!currentMachineId && machines.length) currentMachineId = machines[0].machine_id;
+  document.getElementById('machine-tag').textContent =
+    machines.length === 1 ? '1 machine' : `${machines.length} machines`;
+}
+
+// machine_id could contain characters that aren't valid in an HTML id, so
+// every DOM id derived from it goes through this first.
+function domSafeId(machineId) {
+  return machineId.replace(/[^a-zA-Z0-9_-]/g, '_');
+}
+
+function renderMachineCards() {
+  const grid = document.getElementById('machines-grid');
+  if (!machines.length) {
+    grid.innerHTML = '<p style="color:var(--text-dim);font-size:13px">No machines yet - add one in settings below.</p>';
+    return;
+  }
+
+  grid.innerHTML = machines.map(m => {
+    const id = domSafeId(m.machine_id);
+    const selected = m.machine_id === currentMachineId ? ' selected' : '';
+    return `
+      <div class="machine-card${selected}" data-machine="${m.machine_id}" id="card-${id}">
+        <div class="mc-header">
+          <div class="mc-title">${m.machine_id}</div>
+          <div class="mc-product" id="mc-product-${id}">${m.product_type}</div>
+        </div>
+        <div class="mc-body">
+          <div class="mc-status-col">
+            <div class="mc-status">
+              <div class="dot" id="mc-dot-${id}"></div>
+              <div class="mc-status-text" id="mc-status-text-${id}">-</div>
+            </div>
+            <div class="mc-status-sub" id="mc-status-sub-${id}"></div>
+          </div>
+          <div class="mc-cycle-col">
+            <div class="mc-cycle-label">Avg cycle<br>(last 10)</div>
+            <div class="mc-cycle-value" id="mc-cycle-${id}">-</div>
+          </div>
+          <div class="mc-gauges">
+            <div class="mc-gauge-col">
+              <div class="mc-gauge-wrap">
+                <svg width="52" height="52" viewBox="0 0 140 140">
+                  <circle cx="70" cy="70" r="60" fill="none" stroke="var(--border)" stroke-width="14"/>
+                  <circle id="mc-gauge-arc-${id}" cx="70" cy="70" r="60" fill="none" stroke="var(--teal)" stroke-width="14"
+                          stroke-linecap="round" stroke-dasharray="377" stroke-dashoffset="377"/>
+                </svg>
+                <div class="mc-gauge-pct" id="mc-gauge-pct-${id}">-</div>
+              </div>
+              <div class="mc-gauge-caption">Efficiency</div>
+            </div>
+            <div class="mc-gauge-col">
+              <div class="mc-gauge-wrap">
+                <svg width="52" height="52" viewBox="0 0 140 140">
+                  <circle cx="70" cy="70" r="60" fill="none" stroke="var(--border)" stroke-width="14"/>
+                  <circle id="mc-gauge-arc-daily-${id}" cx="70" cy="70" r="60" fill="none" stroke="var(--teal)" stroke-width="14"
+                          stroke-linecap="round" stroke-dasharray="377" stroke-dashoffset="377"/>
+                </svg>
+                <div class="mc-gauge-pct" id="mc-gauge-pct-daily-${id}">-</div>
+              </div>
+              <div class="mc-gauge-caption">Today</div>
+            </div>
+          </div>
+        </div>
+        <div class="mc-footer">
+          <div class="mc-daily" id="mc-daily-${id}">-</div>
+          <div class="mc-uptime" id="mc-uptime-${id}"></div>
+        </div>
+      </div>
+    `;
+  }).join('');
+
+  grid.querySelectorAll('.machine-card').forEach(card => {
+    card.addEventListener('click', () => selectMachine(card.dataset.machine));
+  });
+
+  renderMachinesList();
+}
+
+function renderMachinesList() {
+  const tbody = document.getElementById('machines-list-body');
+  if (!tbody) return;
+
+  tbody.innerHTML = machines.map(m => {
+    const selected = m.machine_id === currentMachineId ? ' class="selected"' : '';
+    const range = `${m.detect_distance_min_cm ?? 0}-${m.detect_distance_cm}`;
+    return `
+      <tr${selected} data-machine="${m.machine_id}">
+        <td>${m.machine_id}</td>
+        <td>${m.product_type}</td>
+        <td>${range}</td>
+        <td>${m.operational_hours_per_day}</td>
+        <td style="white-space:nowrap">
+          <button class="row-action-btn edit-machine-btn" data-machine="${m.machine_id}">Edit</button>
+          <button class="row-action-btn delete delete-machine-btn" data-machine="${m.machine_id}">Delete</button>
+        </td>
+      </tr>
+    `;
+  }).join('');
+
+  tbody.querySelectorAll('.edit-machine-btn').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      await selectMachine(btn.dataset.machine);
+      document.getElementById('settings-machine-label').scrollIntoView({ behavior: 'smooth', block: 'center' });
+    });
+  });
+  tbody.querySelectorAll('.delete-machine-btn').forEach(btn => {
+    btn.addEventListener('click', () => deleteMachine(btn.dataset.machine));
+  });
+}
+
+async function deleteMachine(machineId) {
+  if (!confirm(`Delete machine "${machineId}"? This can't be undone.`)) return;
+
+  const msg = document.getElementById('add-machine-msg');
+  const { error } = await sb.from('machine_config').delete().eq('machine_id', machineId);
+
+  if (error) {
+    msg.style.color = 'var(--red)';
+    // A foreign key constraint blocks deletion if this machine already has
+    // production_events/device_logs - that's a safety net, not a bug, so
+    // say so rather than just surfacing the raw Postgres error.
+    if (error.message && error.message.toLowerCase().includes('foreign key')) {
+      msg.textContent = `Can't delete "${machineId}" - it already has recorded events/logs. Deleting those first would lose that history.`;
+    } else {
+      msg.textContent = error.message;
+    }
+    return;
+  }
+
+  msg.style.color = 'var(--teal)';
+  msg.textContent = `Deleted ${machineId}.`;
+
+  await loadMachines();
+
+  if (currentMachineId === machineId) {
+    currentMachineId = machines.length ? machines[0].machine_id : null;
+    if (currentMachineId) {
+      document.getElementById('settings-machine-label').textContent = currentMachineId;
+      await loadMachineConfig();
+      await Promise.all([loadHistory(), loadLiveChart(), loadLogs(), loadDetections()]);
+      populateSettingsForm();
+    } else {
+      document.getElementById('settings-machine-label').textContent = '-';
+    }
+  }
+
+  renderMachineCards();
+  await loadAllMachineLiveStats();
+  await loadAllMachineDailyStats();
+}
+
+async function selectMachine(machineId) {
+  if (machineId === currentMachineId) return;
+  currentMachineId = machineId;
+
+  document.querySelectorAll('.machine-card').forEach(card => {
+    card.classList.toggle('selected', card.dataset.machine === machineId);
+  });
+  document.querySelectorAll('#machines-list-body tr').forEach(row => {
+    row.classList.toggle('selected', row.dataset.machine === machineId);
+  });
+  document.getElementById('settings-machine-label').textContent = machineId;
+
+  await loadMachineConfig();
+  await Promise.all([loadHistory(), loadLiveChart(), loadLogs(), loadDetections(), loadAllMachineDailyStats()]);
+  populateSettingsForm();
+}
+
+async function loadMachineConfig() {
+  const { data, error } = await sb.from('machine_config').select('*').eq('machine_id', currentMachineId).single();
+  if (error) { console.error(error); return; }
+  machineConfig = data;
+}
+
+async function loadProductTypes() {
+  const { data, error } = await sb.from('product_types').select('*').order('product_type');
+  if (error) { console.error(error); return; }
+  productTypes = data || [];
+}
+
+function expectedCycleTimeFor(productType) {
+  const p = productTypes.find(p => p.product_type === productType);
+  return p ? Number(p.expected_cycle_time_seconds) : null;
+}
+function renderGauge(suffix, pct) {
+  const circumference = 2 * Math.PI * 60;
+  const arc = document.getElementById(`gauge-arc-${suffix}`);
+  const label = document.getElementById(`gauge-pct-${suffix}`);
+
+  if (pct === null) {
+    arc.setAttribute('stroke-dashoffset', circumference);
+    label.textContent = '-';
+    return;
+  }
+
+  const clamped = Math.max(0, Math.min(pct, 100));
+  const offset = circumference * (1 - clamped / 100);
+  arc.setAttribute('stroke-dashoffset', offset);
+
+  let color = 'var(--red)';
+  if (pct >= 85) color = 'var(--teal)';
+  else if (pct >= 60) color = 'var(--amber)';
+  arc.setAttribute('stroke', color);
+
+  label.textContent = `${Math.round(pct)}%`;
+}
+
+// ---------------- Live status (running / idle, last-10-cycle gauge) ----------------
+
+function formatDuration(totalSeconds) {
+  const s = Math.max(0, Math.round(totalSeconds));
+  const m = Math.floor(s / 60);
+  const rem = s % 60;
+  if (m === 0) return `${rem}s`;
+  return `${m}m ${rem}s`;
+}
+
+// Pure calculation, reused for both the compact card and the detail panel.
+function computeLiveStats(events, expectedCycle) {
+  const idleThreshold = expectedCycle ? expectedCycle * 3 : 60;
+
+  if (events.length === 0) {
+    return { hasData: false };
+  }
+
+  const lastEvent = events[0]; // most recent, since ordered descending
+  const secondsSinceLast = DateTime.now().diff(DateTime.fromISO(lastEvent.event_timestamp, { zone: 'utc' }), 'seconds').seconds;
+  const isIdle = secondsSinceLast >= idleThreshold;
+
+  // "Actual cycle time": average over the last 10 genuine running cycles,
+  // idle gaps excluded - answers "how fast does it run when it's running".
+  const runningCycleTimes = events
+    .filter(e => e.cycle_time_seconds !== null && e.cycle_time_seconds !== undefined && e.cycle_time_seconds < idleThreshold)
+    .slice(0, 10)
+    .map(e => e.cycle_time_seconds);
+
+  const avgActualCycle = runningCycleTimes.length
+    ? runningCycleTimes.reduce((a, b) => a + b, 0) / runningCycleTimes.length
+    : null;
+
+  // Efficiency: idle time SHOULD drag this down. Real elapsed time across
+  // the last 10 cycles (idle gaps included) plus time still accruing now,
+  // compared to the ideal time those cycles should have taken.
+  let liveEfficiency = null;
+  if (expectedCycle) {
+    const recentRaw = events.slice(0, 10);
+    const rawCycleTimes = recentRaw
+      .map(e => e.cycle_time_seconds)
+      .filter(v => v !== null && v !== undefined);
+
+    let totalElapsed = rawCycleTimes.reduce((a, b) => a + b, 0);
+    let cycleCount = rawCycleTimes.length;
+    totalElapsed += secondsSinceLast;
+    cycleCount += 1;
+
+    if (cycleCount > 0 && totalElapsed > 0) {
+      liveEfficiency = (expectedCycle * cycleCount / totalElapsed) * 100;
+    }
+  }
+
+  return { hasData: true, isIdle, secondsSinceLast, avgActualCycle, liveEfficiency };
+}
+
+// One query covers every machine's card, rather than one query per machine.
+async function loadAllMachineLiveStats() {
+  if (!machines.length) return;
+  const ids = machines.map(m => m.machine_id);
+
+  const { data, error } = await sb
+    .from('production_events')
+    .select('*')
+    .in('machine_id', ids)
+    .order('event_timestamp', { ascending: false })
+    .limit(60 * ids.length);
+
+  if (error) { console.error(error); return; }
+
+  const byMachine = {};
+  ids.forEach(id => byMachine[id] = []);
+  (data || []).forEach(e => { if (byMachine[e.machine_id]) byMachine[e.machine_id].push(e); });
+
+  machines.forEach(m => {
+    const expectedCycle = expectedCycleTimeFor(m.product_type);
+    const stats = computeLiveStats(byMachine[m.machine_id] || [], expectedCycle);
+    updateMachineCard(m, stats);
+  });
+}
+
+// Today's unit count and uptime/idle split, for all machines in one query -
+// separate from loadAllMachineLiveStats because it needs the full day's
+// events (could be far more than the last-60 window that function uses),
+// not just enough to judge current running/idle status.
+async function loadAllMachineDailyStats() {
+  if (!machines.length) return;
+  const ids = machines.map(m => m.machine_id);
+  const startOfDayNZ = DateTime.now().setZone(TZ).startOf('day');
+
+  const [{ data, error }, { data: rejectData, error: rejectError }] = await Promise.all([
+    sb.from('production_events')
+      .select('*')
+      .in('machine_id', ids)
+      .gte('event_timestamp', startOfDayNZ.toUTC().toISO())
+      .order('event_timestamp', { ascending: true }),
+    sb.from('reject_events')
+      .select('machine_id')
+      .in('machine_id', ids)
+      .gte('event_timestamp', startOfDayNZ.toUTC().toISO()),
+  ]);
+
+  if (error) { console.error(error); return; }
+  if (rejectError) console.error(rejectError); // non-fatal - rejects are a bonus stat, don't block the rest
+
+  const byMachine = {};
+  ids.forEach(id => byMachine[id] = []);
+  (data || []).forEach(e => { if (byMachine[e.machine_id]) byMachine[e.machine_id].push(e); });
+
+  const rejectCounts = {};
+  ids.forEach(id => rejectCounts[id] = 0);
+  (rejectData || []).forEach(r => { if (rejectCounts[r.machine_id] !== undefined) rejectCounts[r.machine_id]++; });
+
+  machines.forEach(m => {
+    const events = byMachine[m.machine_id] || [];
+    const expectedCycle = expectedCycleTimeFor(m.product_type);
+    const idleThreshold = expectedCycle ? expectedCycle * 3 : 60;
+    const dailyUnits = events.reduce((sum, e) => sum + (e.units_per_cycle || 0), 0);
+    const uptime = computeUptimeIdle(events, startOfDayNZ, expectedCycle, idleThreshold);
+    const rejectCount = rejectCounts[m.machine_id];
+    updateMachineCardDaily(m, dailyUnits, uptime, rejectCount);
+
+    // Today's production %, now shown on every card (moved off the detail tile).
+    const unitsPerCycle = m.units_per_cycle;
+    const hoursPerDay = Number(m.operational_hours_per_day);
+    let dailyPct = null;
+    if (expectedCycle && unitsPerCycle) {
+      const expectedUnits = (hoursPerDay * 3600 / expectedCycle) * unitsPerCycle;
+      dailyPct = expectedUnits > 0 ? (dailyUnits / expectedUnits) * 100 : null;
+    }
+    const cardId = domSafeId(m.machine_id);
+    renderRingGauge(
+      document.getElementById(`mc-gauge-arc-daily-${cardId}`),
+      document.getElementById(`mc-gauge-pct-daily-${cardId}`),
+      dailyPct
+    );
+
+    // Reject % - fraction of today's total output (good + rejected) that
+    // was rejected. Only tracked for whichever machine is currently
+    // selected; shown as text in the uptime summary line (renderUptimeSummary).
+    if (m.machine_id === currentMachineId) {
+      const totalOutput = dailyUnits + rejectCount;
+      currentRejectPct = totalOutput > 0 ? (rejectCount / totalOutput) * 100 : null;
+      currentRejectCount = rejectCount;
+    }
+  });
+}
+
+function updateMachineCardDaily(machine, dailyUnits, uptime, rejectCount) {
+  const id = domSafeId(machine.machine_id);
+  const dailyEl = document.getElementById(`mc-daily-${id}`);
+  const uptimeEl = document.getElementById(`mc-uptime-${id}`);
+  if (!dailyEl) return;
+
+  const rejectText = rejectCount > 0 ? ` &middot; <span class="reject-count">${rejectCount} reject${rejectCount === 1 ? '' : 's'}</span>` : '';
+  dailyEl.innerHTML = `${dailyUnits.toLocaleString()} today${rejectText}`;
+  uptimeEl.innerHTML = uptime
+    ? `Up <span class="up">${uptime.uptimePct}%</span> &middot; Idle <span class="idle-pct">${uptime.idlePct}%</span>`
+    : '';
+}
+
+function updateMachineCard(machine, stats) {
+  const id = domSafeId(machine.machine_id);
+  const dot = document.getElementById(`mc-dot-${id}`);
+  const statusText = document.getElementById(`mc-status-text-${id}`);
+  const statusSub = document.getElementById(`mc-status-sub-${id}`);
+  const cycleEl = document.getElementById(`mc-cycle-${id}`);
+  const gaugeArc = document.getElementById(`mc-gauge-arc-${id}`);
+  const gaugePct = document.getElementById(`mc-gauge-pct-${id}`);
+  if (!dot) return; // card not rendered (shouldn't happen, but stay safe)
+
+  if (!stats.hasData) {
+    dot.className = 'dot';
+    statusText.textContent = 'No data';
+    statusSub.textContent = '';
+    cycleEl.textContent = '-';
+    renderRingGauge(gaugeArc, gaugePct, null);
+    return;
+  }
+
+  dot.className = 'dot ' + (stats.isIdle ? 'idle' : 'running');
+  statusText.textContent = stats.isIdle ? 'Idle' : 'Running';
+  statusSub.textContent = stats.isIdle
+    ? `idle ${formatDuration(stats.secondsSinceLast)}`
+    : `${formatDuration(stats.secondsSinceLast)} ago`;
+  cycleEl.textContent = stats.avgActualCycle !== null ? `${stats.avgActualCycle.toFixed(1)}s` : '-';
+  renderRingGauge(gaugeArc, gaugePct, stats.liveEfficiency);
+}
+
+// Shared ring-gauge renderer for the small per-card gauges.
+function renderRingGauge(arcEl, labelEl, pct) {
+  if (!arcEl || !labelEl) return;
+  const circumference = 2 * Math.PI * 60;
+
+  if (pct === null) {
+    arcEl.setAttribute('stroke-dashoffset', circumference);
+    labelEl.textContent = '-';
+    return;
+  }
+
+  const clamped = Math.max(0, Math.min(pct, 100));
+  const offset = circumference * (1 - clamped / 100);
+  arcEl.setAttribute('stroke-dashoffset', offset);
+
+  let color = 'var(--red)';
+  if (pct >= 85) color = 'var(--teal)';
+  else if (pct >= 60) color = 'var(--amber)';
+  arcEl.setAttribute('stroke', color);
+
+  labelEl.textContent = `${Math.round(pct)}%`;
+}
+
+// ---------------- Live chart: today, from the first recorded event ----------------
+
+async function loadLiveChart() {
+  const startOfDayNZ = DateTime.now().setZone(TZ).startOf('day');
+
+  // Find the actual first event of today, so idle time is measured from
+  // when the line actually started, not from midnight or a rolling window.
+  const { data: firstEventData, error: firstEventError } = await sb
+    .from('production_events')
+    .select('event_timestamp')
+    .eq('machine_id', currentMachineId)
+    .gte('event_timestamp', startOfDayNZ.toUTC().toISO())
+    .order('event_timestamp', { ascending: true })
+    .limit(1)
+    .maybeSingle();
+
+  if (firstEventError) { console.error(firstEventError); return; }
+
+  // If nothing's been produced yet today, fall back to midnight so the
+  // chart/summary still render sensibly (as "idle since start of day").
+  const windowStart = firstEventData
+    ? DateTime.fromISO(firstEventData.event_timestamp, { zone: 'utc' })
+    : startOfDayNZ;
+
+  const { data, error } = await sb
+    .from('production_events')
+    .select('*')
+    .eq('machine_id', currentMachineId)
+    .gte('event_timestamp', windowStart.toUTC().toISO())
+    .order('event_timestamp', { ascending: true });
+
+  if (error) { console.error(error); return; }
+
+  const events = data || [];
+  const expectedCycle = expectedCycleTimeFor(machineConfig.product_type);
+  const idleThreshold = expectedCycle ? expectedCycle * 3 : 60;
+
+  const timestamps = events.map(e => DateTime.fromISO(e.event_timestamp, { zone: 'utc' }).toMillis());
+
+  // Per-cycle efficiency: expected time / actual time for that single cycle.
+  // A long idle gap naturally produces a value near zero here, which is what
+  // we want the dip to look like - no separate zeroing logic needed.
+  const values = events.map(e => {
+    if (!expectedCycle || e.cycle_time_seconds === null || e.cycle_time_seconds === undefined) return null;
+    return Math.min((expectedCycle / e.cycle_time_seconds) * 100, 150);
+  });
+
+  const idleFlags = events.map(e =>
+    !!(expectedCycle && e.cycle_time_seconds !== null && e.cycle_time_seconds !== undefined && e.cycle_time_seconds >= idleThreshold)
+  );
+
+  // If the machine is idle right now, extend the line to the present moment
+  // (real elapsed time, not a fake extra category label) so the shaded idle
+  // band grows in real time as the stoppage continues.
+  if (events.length && expectedCycle) {
+    const last = events[events.length - 1];
+    const secondsSinceLast = DateTime.now().diff(DateTime.fromISO(last.event_timestamp, { zone: 'utc' }), 'seconds').seconds;
+    if (secondsSinceLast >= idleThreshold) {
+      timestamps.push(DateTime.now().toMillis());
+      values.push(0);
+      idleFlags.push(true);
+    }
+  }
+
+  renderUptimeSummary(events, windowStart, expectedCycle, idleThreshold);
+  renderLiveChart(timestamps, values, idleFlags, windowStart.toMillis());
+}
+
+function formatHoursMinutes(totalSeconds) {
+  const s = Math.max(0, Math.round(totalSeconds));
+  const h = Math.floor(s / 3600);
+  const m = Math.round((s % 3600) / 60);
+  if (h === 0) return `${m}m`;
+  return `${h}h ${m}m`;
+}
+
+function computeUptimeIdle(events, windowStart, expectedCycle, idleThreshold) {
+  if (!expectedCycle) return null;
+
+  let idleSeconds = 0;
+  let runningSeconds = 0;
+  let stoppageCount = 0;
+  const now = DateTime.now();
+
+  events.forEach(e => {
+    if (e.cycle_time_seconds === null || e.cycle_time_seconds === undefined) return;
+    const end = DateTime.fromISO(e.event_timestamp, { zone: 'utc' });
+    let start = end.minus({ seconds: e.cycle_time_seconds });
+    if (end <= windowStart) return;
+    if (start < windowStart) start = windowStart;
+    const duration = end.diff(start, 'seconds').seconds;
+    const isIdle = e.cycle_time_seconds >= idleThreshold;
+    if (isIdle) { idleSeconds += duration; stoppageCount += 1; }
+    else { runningSeconds += duration; }
+  });
+
+  if (events.length) {
+    const last = events[events.length - 1];
+    const lastEnd = DateTime.fromISO(last.event_timestamp, { zone: 'utc' });
+    const secondsSince = now.diff(lastEnd, 'seconds').seconds;
+    if (secondsSince >= idleThreshold) {
+      idleSeconds += secondsSince;
+      stoppageCount += 1;
+    } else {
+      runningSeconds += secondsSince;
+    }
+  } else {
+    idleSeconds += now.diff(windowStart, 'seconds').seconds;
+  }
+
+  const totalSeconds = idleSeconds + runningSeconds;
+  const uptimePct = totalSeconds > 0 ? Math.round((runningSeconds / totalSeconds) * 100) : 0;
+  return { uptimePct, idlePct: 100 - uptimePct, runningSeconds, idleSeconds, stoppageCount };
+}
+
+function renderUptimeSummary(events, windowStart, expectedCycle, idleThreshold) {
+  const el = document.getElementById('live-uptime-summary');
+  const result = computeUptimeIdle(events, windowStart, expectedCycle, idleThreshold);
+
+  if (!result) {
+    el.innerHTML = `<div class="stat">Set a product cycle time to see uptime / idle time.</div>`;
+    return;
+  }
+
+  const rejectStat = currentRejectPct !== null
+    ? `<div class="stat">Rejects <span class="reject-count">${currentRejectPct.toFixed(1)}%</span> (${currentRejectCount} today)</div>`
+    : '';
+
+  el.innerHTML = `
+    <div class="stat running">Uptime <span class="num">${result.uptimePct}%</span> (${formatHoursMinutes(result.runningSeconds)})</div>
+    <div class="stat idle">Idle <span class="num">${result.idlePct}%</span> (${formatHoursMinutes(result.idleSeconds)})</div>
+    <div class="stat">${result.stoppageCount} stoppage${result.stoppageCount === 1 ? '' : 's'}</div>
+    ${rejectStat}
+  `;
+}
+
+function renderLiveChart(timestamps, values, idleFlags, windowStartMs) {
+  const ctx = document.getElementById('live-chart').getContext('2d');
+  if (liveChart) liveChart.destroy();
+
+  const points = timestamps.map((t, i) => ({ x: t, y: values[i] }));
+
+  liveChart = new Chart(ctx, {
+    type: 'line',
+    data: {
+      datasets: [{
+        data: points,
+        borderWidth: 2,
+        pointRadius: 0,
+        tension: 0.15,
+        spanGaps: false,
+        segment: {
+          borderColor: (segCtx) => idleFlags[segCtx.p1DataIndex] ? '#F5A623' : '#2DD4BF'
+        }
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { display: false },
+        idleShading: { flags: idleFlags, timestamps: timestamps }
+      },
+      scales: {
+        y: { min: 0, max: 150, ticks: { color: '#8B96A3', stepSize: 50, callback: v => v + '%' }, grid: { color: '#333D47' } },
+        x: {
+          type: 'time',
+          min: windowStartMs,
+          max: DateTime.now().toMillis(),
+          adapters: { date: { zone: TZ } },
+          time: { displayFormats: { minute: 'HH:mm', hour: 'HH:mm' } },
+          ticks: { color: '#8B96A3', maxRotation: 0, autoSkip: true, maxTicksLimit: 8 },
+          grid: { display: false }
+        }
+      }
+    }
+  });
+}
+
+// ---------------- Device status & logs ----------------
+
+async function loadLogs() {
+  const { data, error } = await sb
+    .from('device_logs')
+    .select('*')
+    .eq('machine_id', currentMachineId)
+    .order('created_at', { ascending: false })
+    .limit(50);
+
+  if (error) { console.error(error); return; }
+
+  const logs = data || [];
+  renderDeviceStatus(logs);
+  renderLogList(logs);
+}
+
+function renderDeviceStatus(logs) {
+  const el = document.getElementById('device-status');
+
+  if (logs.length === 0) {
+    el.innerHTML = `<div class="dot offline"></div><div>No logs received yet - check the Pi script is running.</div>`;
+    return;
+  }
+
+  const mostRecent = DateTime.fromISO(logs[0].created_at, { zone: 'utc' });
+  const secondsSince = DateTime.now().diff(mostRecent, 'seconds').seconds;
+
+  // Heartbeats are expected every 5 minutes (300s). Give some slack before
+  // calling it stale, and more before calling it offline.
+  let statusClass = 'ok';
+  let statusText = `Last seen ${formatDuration(secondsSince)} ago`;
+  if (secondsSince > 900) {
+    statusClass = 'offline';
+    statusText = `No signal for ${formatDuration(secondsSince)} - check the Pi is powered and running`;
+  } else if (secondsSince > 450) {
+    statusClass = 'stale';
+    statusText = `Last seen ${formatDuration(secondsSince)} ago - overdue for a heartbeat`;
+  }
+
+  el.innerHTML = `<div class="dot ${statusClass}"></div><div>${statusText}</div>`;
+}
+
+function renderLogList(logs) {
+  const el = document.getElementById('log-list');
+  if (logs.length === 0) {
+    el.innerHTML = '';
+    return;
+  }
+  el.innerHTML = logs.map(l => {
+    const time = DateTime.fromISO(l.created_at, { zone: 'utc' }).setZone(TZ).toFormat('dd LLL, HH:mm:ss');
+    return `<div class="log-row level-${l.level}">
+      <div class="log-time">${time}</div>
+      <div class="log-level">${l.level}</div>
+      <div class="log-message">${l.message}</div>
+    </div>`;
+  }).join('');
+}
+
+// ---------------- Recent detections (distance per counted product) ----------------
+
+async function loadDetections() {
+  const { data, error } = await sb
+    .from('production_events')
+    .select('*')
+    .eq('machine_id', currentMachineId)
+    .order('event_timestamp', { ascending: false })
+    .limit(20);
+
+  if (error) { console.error(error); return; }
+  renderDetectionList(data || []);
+}
+
+function renderDetectionList(events) {
+  const el = document.getElementById('detection-list');
+  if (!el) return;
+
+  if (events.length === 0) {
+    el.innerHTML = 'No detections recorded yet.';
+    return;
+  }
+
+  el.innerHTML = events.map(e => {
+    const time = DateTime.fromISO(e.event_timestamp, { zone: 'utc' }).setZone(TZ).toFormat('HH:mm:ss');
+    const distance = e.detected_distance_cm !== null && e.detected_distance_cm !== undefined
+      ? `${e.detected_distance_cm}cm` : '-';
+    const cycle = e.cycle_time_seconds !== null && e.cycle_time_seconds !== undefined
+      ? `${e.cycle_time_seconds.toFixed(1)}s cycle` : 'first event';
+    return `<div class="detection-row">
+      <div class="d-time">${time}</div>
+      <div class="d-distance">${distance}</div>
+      <div class="d-cycle">${cycle}</div>
+      <div class="d-product">${e.product_type}</div>
+    </div>`;
+  }).join('');
+}
+
+// ---------------- History ----------------
+
+async function loadHistory() {
+  const startNZ = DateTime.now().setZone(TZ).startOf('day').minus({ days: 13 });
+
+  const { data, error } = await sb
+    .from('production_events')
+    .select('*')
+    .eq('machine_id', currentMachineId)
+    .gte('event_timestamp', startNZ.toUTC().toISO())
+    .order('event_timestamp', { ascending: true });
+
+  if (error) { console.error(error); return; }
+
+  const events = data || [];
+  const hoursPerDay = Number(machineConfig.operational_hours_per_day);
+
+  // Bucket events by NZ calendar day.
+  const byDay = {};
+  for (let i = 0; i < 14; i++) {
+    const d = startNZ.plus({ days: i });
+    byDay[d.toFormat('yyyy-LL-dd')] = { units: 0, productType: null };
+  }
+  events.forEach(e => {
+    const dayKey = DateTime.fromISO(e.event_timestamp, { zone: 'utc' }).setZone(TZ).toFormat('yyyy-LL-dd');
+    if (!byDay[dayKey]) byDay[dayKey] = { units: 0, productType: null };
+    byDay[dayKey].units += (e.units_per_cycle || 0);
+    if (!byDay[dayKey].productType) byDay[dayKey].productType = e.product_type;
+  });
+
+  const labels = [];
+  const efficiencyValues = [];
+  Object.keys(byDay).sort().forEach(dayKey => {
+    const day = byDay[dayKey];
+    const expectedCycle = expectedCycleTimeFor(day.productType);
+    let eff = null;
+    if (expectedCycle && machineConfig.units_per_cycle) {
+      const expectedUnits = (hoursPerDay * 3600 / expectedCycle) * machineConfig.units_per_cycle;
+      eff = expectedUnits > 0 ? (day.units / expectedUnits) * 100 : null;
+    }
+    labels.push(DateTime.fromFormat(dayKey, 'yyyy-LL-dd').toFormat('dd LLL'));
+    efficiencyValues.push(eff !== null ? Math.round(eff) : 0);
+  });
+
+  renderHistoryChart(labels, efficiencyValues);
+}
+
+function renderHistoryChart(labels, values) {
+  const ctx = document.getElementById('history-chart').getContext('2d');
+  if (historyChart) historyChart.destroy();
+  historyChart = new Chart(ctx, {
+    type: 'bar',
+    data: {
+      labels,
+      datasets: [{
+        data: values,
+        backgroundColor: values.map(v => v >= 85 ? '#2DD4BF' : v >= 60 ? '#F5A623' : '#E5484D'),
+        borderRadius: 4,
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: { legend: { display: false } },
+      scales: {
+        y: { beginAtZero: true, max: 120, ticks: { color: '#8B96A3', callback: v => v + '%' }, grid: { color: '#333D47' } },
+        x: { ticks: { color: '#8B96A3' }, grid: { display: false } }
+      }
+    }
+  });
+}
+
+// ---------------- Page navigation ----------------
+
+document.querySelectorAll('.nav-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    const target = btn.dataset.page;
+    document.querySelectorAll('.page').forEach(p => {
+      p.style.display = p.id === `page-${target}` ? 'block' : 'none';
+    });
+    document.querySelectorAll('.nav-btn').forEach(b => b.classList.toggle('active', b === btn));
+  });
+});
+
+// ---------------- Settings ----------------
+
+document.getElementById('add-machine-btn').addEventListener('click', async () => {
+  const msg = document.getElementById('add-machine-msg');
+  const input = document.getElementById('new-machine-id');
+  const newId = input.value.trim();
+
+  if (!newId) {
+    msg.style.color = 'var(--red)';
+    msg.textContent = 'Enter a machine ID.';
+    return;
+  }
+  if (machines.some(m => m.machine_id === newId)) {
+    msg.style.color = 'var(--red)';
+    msg.textContent = `"${newId}" already exists.`;
+    return;
+  }
+
+  const { error } = await sb.from('machine_config').insert({
+    machine_id: newId,
+    product_type: productTypes.length ? productTypes[0].product_type : 'unset',
+    units_per_cycle: 1,
+    detect_distance_cm: 30,
+    detect_distance_min_cm: 0,
+    operational_hours_per_day: 8,
+  });
+
+  if (error) {
+    msg.style.color = 'var(--red)';
+    msg.textContent = error.message;
+    return;
+  }
+
+  msg.style.color = 'var(--teal)';
+  msg.textContent = `Added ${newId}. Set its distance band and product below.`;
+  input.value = '';
+
+  await loadMachines();
+  renderMachineCards();
+  await selectMachine(newId);
+  await loadAllMachineLiveStats();
+});
+
+function populateSettingsForm() {
+  const select = document.getElementById('setting-product-type');
+  select.innerHTML = productTypes.map(p =>
+    `<option value="${p.product_type}" ${p.product_type === machineConfig.product_type ? 'selected' : ''}>${p.product_type}</option>`
+  ).join('');
+
+  document.getElementById('setting-units-per-cycle').value = machineConfig.units_per_cycle;
+  document.getElementById('setting-distance').value = machineConfig.detect_distance_cm;
+  document.getElementById('setting-distance-min').value = machineConfig.detect_distance_min_cm ?? 0;
+  document.getElementById('setting-hours').value = machineConfig.operational_hours_per_day;
+
+  renderProductList();
+}
+
+let editingProductType = null; // null = add mode, otherwise the product_type currently being edited
+
+function renderProductList() {
+  const tbody = document.getElementById('product-list-body');
+  tbody.innerHTML = productTypes.map(p => `
+    <tr>
+      <td>${p.product_type}</td>
+      <td>${p.expected_cycle_time_seconds}</td>
+      <td>${p.min_cycle_time_seconds ?? '-'}</td>
+      <td style="white-space:nowrap">
+        <button class="row-action-btn edit-product-btn" data-product="${p.product_type}">Edit</button>
+        <button class="row-action-btn delete delete-product-btn" data-product="${p.product_type}">Delete</button>
+      </td>
+    </tr>
+  `).join('');
+
+  tbody.querySelectorAll('.edit-product-btn').forEach(btn => {
+    btn.addEventListener('click', () => startEditProduct(btn.dataset.product));
+  });
+  tbody.querySelectorAll('.delete-product-btn').forEach(btn => {
+    btn.addEventListener('click', () => deleteProductType(btn.dataset.product));
+  });
+}
+
+function startEditProduct(productType) {
+  const product = productTypes.find(p => p.product_type === productType);
+  if (!product) return;
+
+  editingProductType = productType;
+  const nameInput = document.getElementById('new-product-name');
+  nameInput.value = product.product_type;
+  nameInput.disabled = true; // renaming here would create a duplicate row via upsert, not a rename
+  document.getElementById('new-product-cycle').value = product.expected_cycle_time_seconds;
+  document.getElementById('new-product-min-cycle').value = product.min_cycle_time_seconds ?? '';
+  document.getElementById('save-product-btn').textContent = 'Update';
+  document.getElementById('cancel-edit-product-btn').style.display = 'block';
+  document.getElementById('product-save-msg').textContent = `Editing ${productType}`;
+}
+
+function cancelEditProduct() {
+  editingProductType = null;
+  const nameInput = document.getElementById('new-product-name');
+  nameInput.value = '';
+  nameInput.disabled = false;
+  document.getElementById('new-product-cycle').value = '';
+  document.getElementById('new-product-min-cycle').value = '';
+  document.getElementById('save-product-btn').textContent = 'Add / update';
+  document.getElementById('cancel-edit-product-btn').style.display = 'none';
+  document.getElementById('product-save-msg').textContent = '';
+}
+
+document.getElementById('cancel-edit-product-btn').addEventListener('click', cancelEditProduct);
+
+async function deleteProductType(productType) {
+  const inUse = machineConfig && machineConfig.product_type === productType;
+  const warning = inUse
+    ? `"${productType}" is the current product on ${currentMachineId}. Deleting it will leave the machine pointing at a product type that no longer exists. Delete anyway?`
+    : `Delete product type "${productType}"? This can't be undone.`;
+
+  if (!confirm(warning)) return;
+
+  const { error } = await sb.from('product_types').delete().eq('product_type', productType);
+  const msg = document.getElementById('product-save-msg');
+  if (error) {
+    msg.style.color = 'var(--red)';
+    msg.textContent = error.message;
+    return;
+  }
+
+  if (editingProductType === productType) cancelEditProduct();
+  msg.style.color = 'var(--teal)';
+  msg.textContent = `Deleted ${productType}.`;
+  await loadProductTypes();
+  populateSettingsForm();
+}
+
+document.getElementById('save-machine-btn').addEventListener('click', async () => {
+  const msg = document.getElementById('machine-save-msg');
+  const update = {
+    product_type: document.getElementById('setting-product-type').value,
+    units_per_cycle: parseInt(document.getElementById('setting-units-per-cycle').value, 10),
+    detect_distance_cm: parseFloat(document.getElementById('setting-distance').value),
+    detect_distance_min_cm: parseFloat(document.getElementById('setting-distance-min').value) || 0,
+    operational_hours_per_day: parseFloat(document.getElementById('setting-hours').value),
+    updated_at: new Date().toISOString(),
+  };
+  const { error } = await sb.from('machine_config').update(update).eq('machine_id', currentMachineId);
+  if (error) {
+    msg.style.color = 'var(--red)';
+    msg.textContent = error.message;
+  } else {
+    msg.style.color = 'var(--teal)';
+    msg.textContent = 'Saved. The Pi will pick this up within a couple of minutes.';
+    await loadMachineConfig();
+    await loadMachines();       // refresh product/distance shown on the card
+    renderMachineCards();
+    await Promise.all([loadAllMachineLiveStats(), loadHistory(), loadLiveChart()]);
+  }
+});
+
+document.getElementById('save-product-btn').addEventListener('click', async () => {
+  const msg = document.getElementById('product-save-msg');
+  const name = document.getElementById('new-product-name').value.trim();
+  const cycleTime = parseFloat(document.getElementById('new-product-cycle').value);
+  const minCycleInput = document.getElementById('new-product-min-cycle').value;
+  const minCycleTime = minCycleInput === '' ? null : parseFloat(minCycleInput);
+
+  if (!name || !cycleTime) {
+    msg.style.color = 'var(--red)';
+    msg.textContent = 'Enter both a product name and a cycle time.';
+    return;
+  }
+
+  const { error } = await sb.from('product_types').upsert({
+    product_type: name,
+    expected_cycle_time_seconds: cycleTime,
+    min_cycle_time_seconds: minCycleTime,
+    updated_at: new Date().toISOString(),
+  });
+
+  if (error) {
+    msg.style.color = 'var(--red)';
+    msg.textContent = error.message;
+  } else {
+    msg.style.color = 'var(--teal)';
+    msg.textContent = `Saved ${name}.`;
+    const wasEditing = editingProductType !== null;
+    cancelEditProduct(); // clears fields, re-enables the name input, resets button label
+    if (wasEditing) {
+      msg.style.color = 'var(--teal)';
+      msg.textContent = `Saved ${name}.`; // cancelEditProduct clears this message, so restate it
+    }
+    await loadProductTypes();
+    populateSettingsForm();
+  }
+});
+
+checkSession();
+</script>
+</body>
+</html>
