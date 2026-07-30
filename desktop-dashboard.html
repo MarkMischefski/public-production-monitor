@@ -316,6 +316,18 @@
       <h2>Recent detections</h2>
       <div id="detection-list"></div>
     </section>
+
+    <section class="panel">
+      <h2>Live sensor readings</h2>
+      <p style="font-size:12px;color:var(--text-dim);margin:-6px 0 12px">
+        Raw distance readings, roughly once a second, regardless of whether anything gets counted -
+        useful for sorting out sensor placement/noise issues.
+      </p>
+      <table>
+        <thead><tr><th>Time</th><th>Distance</th></tr></thead>
+        <tbody id="live-readings-body"></tbody>
+      </table>
+    </section>
   </div>
 
   <div id="page-settings" class="page" style="display:none">
@@ -503,7 +515,7 @@ async function loadEverything() {
   if (currentMachineId) {
     document.getElementById('settings-machine-label').textContent = currentMachineId;
     await loadMachineConfig();
-    await Promise.all([loadHistory(), loadLiveChart(), loadLogs(), loadDetections()]);
+    await Promise.all([loadHistory(), loadLiveChart(), loadLogs(), loadDetections(), loadLiveReadings()]);
     populateSettingsForm();
   }
   startLiveRefresh();
@@ -514,6 +526,7 @@ let dailyRefreshInterval = null;
 let liveChartRefreshInterval = null;
 let logsRefreshInterval = null;
 let detectionsRefreshInterval = null;
+let liveReadingsRefreshInterval = null;
 
 function startLiveRefresh() {
   if (liveRefreshInterval) clearInterval(liveRefreshInterval);
@@ -526,6 +539,8 @@ function startLiveRefresh() {
   logsRefreshInterval = setInterval(loadLogs, 20000);
   if (detectionsRefreshInterval) clearInterval(detectionsRefreshInterval);
   detectionsRefreshInterval = setInterval(loadDetections, 5000);
+  if (liveReadingsRefreshInterval) clearInterval(liveReadingsRefreshInterval);
+  liveReadingsRefreshInterval = setInterval(loadLiveReadings, 2000);
 }
 
 function stopLiveRefresh() {
@@ -539,6 +554,8 @@ function stopLiveRefresh() {
   logsRefreshInterval = null;
   if (detectionsRefreshInterval) clearInterval(detectionsRefreshInterval);
   detectionsRefreshInterval = null;
+  if (liveReadingsRefreshInterval) clearInterval(liveReadingsRefreshInterval);
+  liveReadingsRefreshInterval = null;
 }
 
 // ---------------- Machines (overview grid + selection) ----------------
@@ -712,7 +729,7 @@ async function selectMachine(machineId) {
   document.getElementById('settings-machine-label').textContent = machineId;
 
   await loadMachineConfig();
-  await Promise.all([loadHistory(), loadLiveChart(), loadLogs(), loadDetections(), loadAllMachineDailyStats()]);
+  await Promise.all([loadHistory(), loadLiveChart(), loadLogs(), loadDetections(), loadLiveReadings(), loadAllMachineDailyStats()]);
   populateSettingsForm();
 }
 
@@ -1154,7 +1171,7 @@ async function loadLogs() {
     .select('*')
     .eq('machine_id', currentMachineId)
     .order('created_at', { ascending: false })
-    .limit(50);
+    .limit(5);
 
   if (error) { console.error(error); return; }
 
@@ -1213,7 +1230,7 @@ async function loadDetections() {
     .select('*')
     .eq('machine_id', currentMachineId)
     .order('event_timestamp', { ascending: false })
-    .limit(20);
+    .limit(5);
 
   if (error) { console.error(error); return; }
   renderDetectionList(data || []);
@@ -1240,6 +1257,36 @@ function renderDetectionList(events) {
       <div class="d-cycle">${cycle}</div>
       <div class="d-product">${e.product_type}</div>
     </div>`;
+  }).join('');
+}
+
+// ---------------- Live sensor readings (raw, ~once/sec, for debugging) ----------------
+
+async function loadLiveReadings() {
+  if (!currentMachineId) return;
+  const { data, error } = await sb
+    .from('sensor_readings')
+    .select('*')
+    .eq('machine_id', currentMachineId)
+    .order('created_at', { ascending: false })
+    .limit(5);
+
+  if (error) { console.error(error); return; }
+  renderLiveReadings(data || []);
+}
+
+function renderLiveReadings(readings) {
+  const tbody = document.getElementById('live-readings-body');
+  if (!tbody) return;
+
+  if (readings.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="2">No readings yet - check the Pi is running.</td></tr>';
+    return;
+  }
+
+  tbody.innerHTML = readings.map(r => {
+    const time = DateTime.fromISO(r.created_at, { zone: 'utc' }).setZone(TZ).toFormat('HH:mm:ss');
+    return `<tr><td>${time}</td><td>${r.distance_cm}cm</td></tr>`;
   }).join('');
 }
 
